@@ -58,4 +58,21 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     });
+    
+    // 设置轮播图高度为宽度的75%，实现4:3宽高比
+    function adjustCarouselHeight() {
+        const carousel = document.querySelector('.carousel-container');
+        const slides = document.querySelector('.carousel-slides');
+        if (carousel && slides) {
+            const width = carousel.clientWidth;
+            slides.style.height = (width * 4 /3) + 'px';
+        }
+    }
+    
+    // 初始调整
+    adjustCarouselHeight();
+    
+    // 窗口大小变化时重新调整
+    window.addEventListener('resize', adjustCarouselHeight);
 });
+

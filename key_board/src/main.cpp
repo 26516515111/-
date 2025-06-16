@@ -14,14 +14,14 @@
 #define SDA_PIN 8
 #define SCL_PIN 9
 #define OLED_ADDR 0x3C
-//RGB
+// RGB
 #define LED_PIN 27
 #define LED_PIN2 14
 #define NUM_LEDS 16
 #define BTN_RAINBOW 13
 
 //----------------屏幕--------------------------
-//声明对象
+// 声明对象
 Adafruit_SSD1306 display(128, 32, &Wire, -1);
 
 //----------------按键--------------------------
@@ -38,7 +38,7 @@ const uint8_t keyCodes[NUM_KEYS] = {
     0x5F, 0x60, 0x61, 0x57,
     0x5C, 0x5D, 0x5E, 0x56,
     0x59, 0x5A, 0x5B, 0x55,
-    0x62, 0x63, 0x58, 0x54};
+    0x63, 0x62, 0x58, 0x54};
 // 键位对应的字符
 const String keyNum[NUM_KEYS] = {
     "AC", "DEL",
@@ -48,8 +48,6 @@ const String keyNum[NUM_KEYS] = {
     ".", "0", "=", "/"};
 // 键位状态
 bool keyPressed[NUM_KEYS] = {false};
-
-
 
 //----------------USB-HID--------------------------
 // 对象声明
@@ -67,7 +65,6 @@ typedef struct
 } KeyboardReport;
 KeyboardReport keyReport = {0};
 
-
 //----------------RGB灯光--------------------------
 // 声明对象
 Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
@@ -78,14 +75,17 @@ int currentBrightness = 0;                   // 当前实际亮度值
 const int SMOOTHING_STEP = 1;                // 亮度渐变步长
 const unsigned long SMOOTHING_INTERVAL = 10; // 渐变间隔(ms)
 int BRIGHTNESS_STEP = 1;
+volatile uint8_t colorPosition = 0; // 当前颜色位置(0-255)
 // RGB模式枚举
 enum LEDMode
 {
   MODE_RAINBOW, // 原版彩虹
   MODE_MARQUEE, // 跑马灯
+  MODE_STEADY   // 恒亮模式
 };
 volatile LEDMode ledMode = MODE_RAINBOW; // 当前灯效模式
-unsigned long effectTimer = 0;           // 效果计时器
+// volatile LEDMode ledMode = MODE_MARQUEE; // 当前灯效模式
+unsigned long effectTimer = 0; // 效果计时器
 // 跑马灯参数
 int marqueePosition = 0;
 // 彩虹色轮函数
@@ -99,7 +99,7 @@ int marqueePosition = 0;
  * 使用255色阶（3*85=255）确保颜色变化连贯无断层
  * 最终效果呈现旋转彩虹色光带效果 */
 // 彩虹灯效
-uint32_t Wheel(byte WheelPos) 
+uint32_t Wheel(byte WheelPos)
 {
   // 反转输入值，使颜色轮逆向旋转（255为起点，0为终点）
   WheelPos = 255 - WheelPos;
@@ -110,36 +110,32 @@ uint32_t Wheel(byte WheelPos)
    * 绿色分量保持为0 */
   if (WheelPos < 85)
     return strip.Color(
-      255 - WheelPos * 3, 
-      0,                  
-      WheelPos * 3       
-  );
+        255 - WheelPos * 3,
+        0,
+        WheelPos * 3);
   /* 第二阶段：蓝色 -> 绿色渐变（当WheelPos在85-169范围时）
    * 蓝色分量从252递减至3（255 - 0*3 ~ 255 - 84*3）
    * 绿色分量从0递增至252（0*3 ~ 84*3）
    * 红色分量保持为0 */
-  if (WheelPos < 170) 
+  if (WheelPos < 170)
   {
-    WheelPos -= 85;       
+    WheelPos -= 85;
     return strip.Color(
-      0,                  
-      WheelPos * 3,       
-      255 - WheelPos * 3  
-    );
+        0,
+        WheelPos * 3,
+        255 - WheelPos * 3);
   }
 
   /* 第三阶段：绿色 -> 红色渐变（当WheelPos在170-255范围时）
    * 绿色分量从252递减至3（255 - 0*3 ~ 255 - 84*3）
    * 红色分量从0递增至252（0*3 ~ 84*3）
    * 蓝色分量保持为0 */
-  WheelPos -= 170;         
+  WheelPos -= 170;
   return strip.Color(
-    WheelPos * 3,         
-    255 - WheelPos * 3,   
-    0                     
-  );
+      WheelPos * 3,
+      255 - WheelPos * 3,
+      0);
 }
-
 
 void effectRainbow()
 {
@@ -147,7 +143,7 @@ void effectRainbow()
   for (int i = 0; i < NUM_LEDS; i++)
   {
     strip.setPixelColor(i, Wheel((i + offset) & 255));
-      strip2.setPixelColor(marqueePosition, 0xFF0000);  
+    strip2.setPixelColor(marqueePosition, 0xFF0000);
   }
   strip.show();
   strip2.show();
@@ -170,6 +166,25 @@ void effectMarquee()
     marqueePosition = (marqueePosition + 1) % NUM_LEDS;
   }
 }
+
+// 恒亮模式 - 使用旋钮控制颜色
+void effectSteady()
+{
+  // 使用当前颜色位置获取颜色值
+  uint32_t currentColor = Wheel(colorPosition);
+
+  // 所有LED设置为相同的颜色
+  for (int i = 0; i < NUM_LEDS; i++)
+  {
+    strip.setPixelColor(i, currentColor);
+    strip2.setPixelColor(i, currentColor);
+  }
+
+  strip.show();
+  strip2.show();
+
+  delay(20); // 短延时保持响应灵敏度
+}
 // 灯效模式调用
 void runLEDEffect()
 {
@@ -181,6 +196,9 @@ void runLEDEffect()
   case MODE_MARQUEE:
     effectMarquee();
     break;
+  case MODE_STEADY:
+    effectSteady();
+    break;
   }
 }
 
@@ -188,41 +206,50 @@ void runLEDEffect()
 void handleEncoderRotation()
 {
   // 静态变量保存前次状态（CLK和DT的组合状态）
-  static uint8_t lastState = 0;    // 存储上一次的引脚组合状态（2位二进制）
-  static unsigned long lastTime = 0; // 存储上次状态变化的时间戳（防抖用）
+  static uint8_t lastState = 0;          // 存储上一次的引脚组合状态（2位二进制）
+  static unsigned long lastTime = 0;     // 存储上次状态变化的时间戳（防抖用）
   const unsigned long debounceDelay = 5; // 消抖时间阈值（单位：毫秒）
 
-  // 读取当前编码器状态（将两个引脚状态合并为2位二进制数）
-  // 格式：高1位是CLK引脚状态，低1位是DT引脚状态
+  // 读取当前编码器状态
   uint8_t state = (digitalRead(EC11_CLK) << 1) | digitalRead(EC11_DT);
 
-  // 检测有效状态变化（状态不同且满足消抖时间条件）
+  // 检测有效状态变化
   if (state != lastState && (millis() - lastTime > debounceDelay))
   {
-    /* 顺时针旋转状态序列检测（EC11编码器四步变化规律）：
-     * 00 -> 01 -> 11 -> 10 -> 00
-     * 当检测到以下任一有效转换时判定为顺时针旋转：
- */
+    // 检测顺时针旋转
     if ((lastState == 0b00 && state == 0b01) ||
         (lastState == 0b01 && state == 0b11) ||
         (lastState == 0b11 && state == 0b10) ||
         (lastState == 0b10 && state == 0b00))
     {
-      // 顺时针旋转：降低目标亮度（需确保不低于最小值）
-      targetBrightness = (targetBrightness - BRIGHTNESS_STEP);
+      if (ledMode == MODE_STEADY)
+      {
+        // 恒亮模式下调整颜色
+        colorPosition = (colorPosition + 5) % 256; // 较大步进以明显看出变化
+      }
+      else
+      {
+        // 其他模式调整亮度
+        targetBrightness = constrain(targetBrightness - BRIGHTNESS_STEP, 0, 255);
+      }
     }
-    /* 逆时针旋转状态序列检测（反向四步变化规律）：
-     * 00 -> 10 -> 11 -> 01 -> 00
-     * 当检测到以下任一有效转换时判定为逆时针旋转：
- */
+    // 检测逆时针旋转
     else if (
         (lastState == 0b00 && state == 0b10) ||
         (lastState == 0b10 && state == 0b11) ||
         (lastState == 0b11 && state == 0b01) ||
         (lastState == 0b01 && state == 0b00))
     {
-      // 逆时针旋转：增加目标亮度（需确保不超过最大值）
-      targetBrightness = (targetBrightness + BRIGHTNESS_STEP);
+      if (ledMode == MODE_STEADY)
+      {
+        // 恒亮模式下调整颜色
+        colorPosition = (colorPosition - 5) % 256; // 较大步进以明显看出变化
+      }
+      else
+      {
+        // 其他模式调整亮度
+        targetBrightness = constrain(targetBrightness + BRIGHTNESS_STEP, 0, 255);
+      }
     }
 
     // 更新状态变化时间戳
@@ -232,23 +259,21 @@ void handleEncoderRotation()
   }
 }
 
-
-
 //----------------计算器--------------------------
 String calcExpression = "";
 String calcDisplay = "0";
 bool needsClear = false;
 String calcDisplayNum = "";
 
-//计算器逻辑处理
+// 计算器逻辑处理
 float evaluateExpression(String expr)
 {
-  expr.replace(" ", "");  // 移除所有空格，确保表达式紧凑
-  float result = 0;       // 最终计算结果
-  float currentTerm = 0;  // 当前处理的运算项（用于处理乘除优先级）
-  char op = '+';          // 当前运算符（初始化为+）
-  String numStr;          // 临时存储数字字符串（支持多位数和小数）
-  bool newNum = true;     // 标志位，表示是否开始新数字输入
+  expr.replace(" ", ""); // 移除所有空格，确保表达式紧凑
+  float result = 0;      // 最终计算结果
+  float currentTerm = 0; // 当前处理的运算项（用于处理乘除优先级）
+  char op = '+';         // 当前运算符（初始化为+）
+  String numStr;         // 临时存储数字字符串（支持多位数和小数）
+  bool newNum = true;    // 标志位，表示是否开始新数字输入
 
   // 逐字符解析表达式
   for (int i = 0; i < expr.length(); i++)
@@ -260,22 +285,22 @@ float evaluateExpression(String expr)
      * 3. 合法负号：出现在数字开头或运算符后 */
     if (isdigit(c) || c == '.' || (c == '-' && newNum))
     {
-      numStr += c;        // 将字符追加到数字缓冲区
-      newNum = false;     // 标记进入数字输入状态
+      numStr += c;    // 将字符追加到数字缓冲区
+      newNum = false; // 标记进入数字输入状态
     }
     // 运算符处理分支（当前字符为运算符且数字缓冲区非空）
     else if (!newNum)
     {
       float num = numStr.toFloat(); // 转换缓冲区为浮点数
       numStr = "";                  // 清空数字缓冲区
-      
+
       /* 根据前一个运算符处理当前项（实现乘除优先级）：
        * 加减运算符：将当前项加入结果
        * 乘除运算符：立即计算当前项 */
       switch (op)
       {
       case '+':
-        currentTerm = num;  // 加法项直接存入当前项
+        currentTerm = num; // 加法项直接存入当前项
         break;
       case '-':
         currentTerm = -num; // 减法项转为负数存储
@@ -285,7 +310,7 @@ float evaluateExpression(String expr)
         break;
       case '/':
         if (num == 0)
-          return NAN;      // 除零错误返回特殊值
+          return NAN;       // 除零错误返回特殊值
         currentTerm /= num; // 除法立即计算
         break;
       }
@@ -298,8 +323,8 @@ float evaluateExpression(String expr)
         result += currentTerm; // 将累计的当前项加入最终结果
         currentTerm = 0;       // 重置当前项
       }
-      op = c;          // 更新当前运算符
-      newNum = true;   // 标记需要开始新数字
+      op = c;        // 更新当前运算符
+      newNum = true; // 标记需要开始新数字
     }
   }
 
@@ -308,7 +333,7 @@ float evaluateExpression(String expr)
   if (numStr.length() > 0)
   {
     float num = numStr.toFloat();
-    switch (op)  // 根据最后的运算符处理
+    switch (op) // 根据最后的运算符处理
     {
     case '+':
       currentTerm = num;
@@ -326,13 +351,10 @@ float evaluateExpression(String expr)
       break;
     }
   }
-  
-  result += currentTerm;  // 将最后的当前项加入结果
-  return result;          // 返回最终计算结果
+
+  result += currentTerm; // 将最后的当前项加入结果
+  return result;         // 返回最终计算结果
 }
-
-
-
 
 //----------------核心1--------------------------
 //----------------入口--------------------------
@@ -381,7 +403,6 @@ void loop()
         keyPressed[i] = false;
       }
     }
-
   }
   else
   { // 计算器模式
@@ -411,7 +432,12 @@ void loop()
         }
         else if (key == ".")
         { // 处理小数点
-          if (calcExpression.indexOf('.') == -1)
+          // 检查当前操作数是否已包含小数点
+          bool hasDecimal = false;
+          int lastOpPos = -1;
+
+          // 找出最后一个运算
+          if (calcDisplayNum.indexOf('.') == -1)
           {
             calcExpression += key;
             calcDisplayNum += key;
@@ -469,8 +495,23 @@ void loop()
         keyPressed[i] = false;
       }
     }
-
   }
+
+  if (TinyUSBDevice.mounted())
+  {
+    // 键盘模式下，检测是否同时按下特定组合键
+    if (digitalRead(keyPins[0]) == LOW && digitalRead(keyPins[1]) == LOW)
+    {
+      static unsigned long comboTime = 0;
+      if (millis() - comboTime > 1000)
+      { // 1秒延迟防止频繁切换
+        // 在三种模式间循环切换
+        ledMode = (LEDMode)((ledMode + 1) % 3); // 0->1->2->0->1->...
+        comboTime = millis();
+      }
+    }
+  }
+
   delay(10);
 }
 
@@ -488,8 +529,8 @@ void setup1()
   display.setTextColor(SSD1306_WHITE);
   display.setCursor(0, 0);
   display.println("EDA-Keypad");
-   display.setCursor(100, 22);
-   display.setTextSize(1);
+  display.setCursor(100, 22);
+  display.setTextSize(1);
   display.println("v1.0");
   display.display();
   delay(3000);
@@ -499,7 +540,7 @@ void setup1()
   strip.setBrightness(currentBrightness);
   strip.clear();
   strip.show();
-    strip2.begin();
+  strip2.begin();
   strip2.setBrightness(currentBrightness);
   strip2.clear();
   strip2.show();
@@ -513,7 +554,8 @@ void loop1()
   {
     lastSmoothUpdate = millis();
     // 渐进式调整当前亮度
-    if(targetBrightness>255)targetBrightness=255;
+    if (targetBrightness > 255)
+      targetBrightness = 255;
     if (currentBrightness != targetBrightness)
     {
       int direction = (targetBrightness > currentBrightness) ? 1 : -1;
@@ -523,25 +565,32 @@ void loop1()
     }
   }
   runLEDEffect();
-  if (TinyUSBDevice.mounted())//USB通讯成功时
+  if (TinyUSBDevice.mounted()) // USB通讯成功时
   {
     display.clearDisplay();
     display.setTextSize(1);
     display.setCursor(0, 0);
     display.println("--  KeyBoard Mode  --");
     display.printf("Brightness: %d%%\n", (currentBrightness * 100) / 255);
-    if (ledMode == 0)//
+
+    switch (ledMode)
     {
+    case MODE_RAINBOW:
       display.println("Light-Mode: RAINBOW");
-    }
-    else
-    {
+      break;
+    case MODE_MARQUEE:
       display.println("Light-Mode: MARQUEE");
+      break;
+    case MODE_STEADY:
+      display.println("Light-Mode: STEADY");
+      display.printf("Color: %d\n", colorPosition);
+      break;
     }
+
     display.println("Version:    V1.0");
     display.display();
   }
-  else//连接设备不支持USB通讯协议时
+  else // 连接设备不支持USB通讯协议时
   {
     // 计算器显示模式
     display.clearDisplay();
